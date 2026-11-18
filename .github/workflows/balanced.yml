@@ -21,7 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build balanced list with AdGuard
+      - name: Build AdGuard and AdAway list
         shell: bash
         run: |
           python3 - <<'PY'
@@ -30,20 +30,13 @@ jobs:
           from pathlib import Path
 
           sources = {
-              "HaGeZi Multi NORMAL": (
-                  "https://cdn.jsdelivr.net/gh/"
-                  "hagezi/dns-blocklists@latest/"
-                  "wildcard/multi-onlydomains.txt"
-              ),
-              "HaGeZi Threat Intelligence Mini": (
-                  "https://cdn.jsdelivr.net/gh/"
-                  "hagezi/dns-blocklists@latest/"
-                  "wildcard/tif.mini-onlydomains.txt"
-              ),
-              "AdGuard DNS Filter": (
+              "AdGuard DNS Filter":
                   "https://adguardteam.github.io/"
-                  "AdGuardSDNSFilter/Filters/filter.txt"
-              ),
+                  "HostlistsRegistry/assets/filter_1.txt",
+
+              "AdAway Default Blocklist":
+                  "https://adguardteam.github.io/"
+                  "HostlistsRegistry/assets/filter_2.txt",
           }
 
           valid = re.compile(
@@ -52,7 +45,7 @@ jobs:
               r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
           )
 
-          adguard_rule = re.compile(
+          adblock = re.compile(
               r"^\|\|([a-z0-9.-]+)\^$",
               re.IGNORECASE
           )
@@ -78,36 +71,34 @@ jobs:
 
               source_domains = set()
 
-              for line in content.splitlines():
-                  line = line.strip().lower()
+              for raw_line in content.splitlines():
+                  line = raw_line.strip().lower()
 
-                  if not line:
-                      continue
-
-                  if line.startswith(
+                  if not line or line.startswith(
                       ("!", "#", "[", "@@")
                   ):
                       continue
 
                   domain = None
 
-                  # AdGuard-style domain blocking
-                  match = adguard_rule.fullmatch(line)
+                  match = adblock.fullmatch(line)
 
                   if match:
                       domain = match.group(1)
 
-                  # Plain domain entries from HaGeZi
                   elif valid.fullmatch(line):
                       domain = line
 
-                  # Hosts-file format
-                  elif line.startswith(
-                      ("0.0.0.0 ", "127.0.0.1 ")
-                  ):
+                  else:
                       parts = line.split()
 
-                      if len(parts) == 2:
+                      if (
+                          len(parts) == 2
+                          and parts[0] in (
+                              "0.0.0.0",
+                              "127.0.0.1"
+                          )
+                      ):
                           domain = parts[1]
 
                   if domain and valid.fullmatch(domain):
@@ -120,15 +111,9 @@ jobs:
                   flush=True
               )
 
-              # Prevent broken or empty downloads
-              minimum = (
-                  1000 if name == "AdGuard DNS Filter"
-                  else 10000
-              )
-
-              if count < minimum:
+              if count < 1000:
                   raise RuntimeError(
-                      f"{name}: too few valid domains"
+                      f"{name}: too few domains"
                   )
 
               domains.update(source_domains)
@@ -140,8 +125,8 @@ jobs:
               flush=True
           )
 
-          # Safety limits for MikroTik hAP ax2
-          if not 100000 <= total <= 600000:
+          # Safety checks for MikroTik hAP ax2
+          if not 10000 <= total <= 600000:
               raise RuntimeError(
                   f"Unexpected domain count: {total}"
               )
@@ -149,10 +134,7 @@ jobs:
           output = Path("adlist-balanced.txt")
 
           data = "\n".join(sorted(domains)) + "\n"
-
-          size_mb = len(
-              data.encode("utf-8")
-          ) / 1000000
+          size_mb = len(data.encode("utf-8")) / 1000000
 
           print(
               f"Final file size: {size_mb:.2f} MB",
@@ -169,7 +151,7 @@ jobs:
               encoding="utf-8"
           )
 
-          print("Balanced Adlist created successfully")
+          print("Adlist created successfully")
           PY
 
       - name: Commit balanced list
@@ -182,6 +164,6 @@ jobs:
           git add adlist-balanced.txt
 
           if ! git diff --cached --quiet; then
-            git commit -m "Update balanced adlist with AdGuard"
+            git commit -m "Update AdGuard and AdAway list"
             git push
           fi
