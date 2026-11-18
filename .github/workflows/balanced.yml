@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: balanced-adlist
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,7 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build balanced list
+      - name: Build balanced list with AdGuard
         shell: bash
         run: |
           python3 - <<'PY'
@@ -25,16 +29,21 @@ jobs:
           import urllib.request
           from pathlib import Path
 
-          base = (
-              "https://cdn.jsdelivr.net/gh/"
-              "hagezi/dns-blocklists@latest/"
-              "wildcard/"
-          )
-
           sources = {
-              "Multi NORMAL": "multi-onlydomains.txt",
-              "Threat Intelligence Mini":
-                  "tif.mini-onlydomains.txt",
+              "HaGeZi Multi NORMAL": (
+                  "https://cdn.jsdelivr.net/gh/"
+                  "hagezi/dns-blocklists@latest/"
+                  "wildcard/multi-onlydomains.txt"
+              ),
+              "HaGeZi Threat Intelligence Mini": (
+                  "https://cdn.jsdelivr.net/gh/"
+                  "hagezi/dns-blocklists@latest/"
+                  "wildcard/tif.mini-onlydomains.txt"
+              ),
+              "AdGuard DNS Filter": (
+                  "https://adguardteam.github.io/"
+                  "AdGuardSDNSFilter/Filters/filter.txt"
+              ),
           }
 
           valid = re.compile(
@@ -43,15 +52,21 @@ jobs:
               r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
           )
 
+          adguard_rule = re.compile(
+              r"^\|\|([a-z0-9.-]+)\^$",
+              re.IGNORECASE
+          )
+
           domains = set()
 
-          for name, filename in sources.items():
-              url = base + filename
+          for name, url in sources.items():
               print(f"Downloading {name}", flush=True)
 
               request = urllib.request.Request(
                   url,
-                  headers={"User-Agent": "MikroTik-Adlist"}
+                  headers={
+                      "User-Agent": "MikroTik-Adlist/1.0"
+                  }
               )
 
               with urllib.request.urlopen(
@@ -61,54 +76,112 @@ jobs:
                       "utf-8", errors="replace"
                   )
 
-              count = 0
+              source_domains = set()
 
               for line in content.splitlines():
-                  domain = line.strip().lower()
+                  line = line.strip().lower()
 
-                  if domain.startswith("#") or not domain:
+                  if not line:
                       continue
 
-                  if valid.fullmatch(domain):
-                      domains.add(domain)
-                      count += 1
+                  if line.startswith(
+                      ("!", "#", "[", "@@")
+                  ):
+                      continue
 
-              if count < 1000:
+                  domain = None
+
+                  # AdGuard-style domain blocking
+                  match = adguard_rule.fullmatch(line)
+
+                  if match:
+                      domain = match.group(1)
+
+                  # Plain domain entries from HaGeZi
+                  elif valid.fullmatch(line):
+                      domain = line
+
+                  # Hosts-file format
+                  elif line.startswith(
+                      ("0.0.0.0 ", "127.0.0.1 ")
+                  ):
+                      parts = line.split()
+
+                      if len(parts) == 2:
+                          domain = parts[1]
+
+                  if domain and valid.fullmatch(domain):
+                      source_domains.add(domain)
+
+              count = len(source_domains)
+
+              print(
+                  f"{name}: {count} valid domains",
+                  flush=True
+              )
+
+              # Prevent broken or empty downloads
+              minimum = (
+                  1000 if name == "AdGuard DNS Filter"
+                  else 10000
+              )
+
+              if count < minimum:
                   raise RuntimeError(
                       f"{name}: too few valid domains"
                   )
 
-              print(f"{name}: {count} entries")
+              domains.update(source_domains)
 
-          if not 100000 <= len(domains) <= 600000:
+          total = len(domains)
+
+          print(
+              f"Total unique domains: {total}",
+              flush=True
+          )
+
+          # Safety limits for MikroTik hAP ax2
+          if not 100000 <= total <= 600000:
               raise RuntimeError(
-                  f"Unexpected total: {len(domains)}"
+                  f"Unexpected domain count: {total}"
               )
 
           output = Path("adlist-balanced.txt")
+
+          data = "\n".join(sorted(domains)) + "\n"
+
+          size_mb = len(
+              data.encode("utf-8")
+          ) / 1000000
+
+          print(
+              f"Final file size: {size_mb:.2f} MB",
+              flush=True
+          )
+
+          if size_mb > 15:
+              raise RuntimeError(
+                  f"File too large: {size_mb:.2f} MB"
+              )
+
           output.write_text(
-              "\n".join(sorted(domains)) + "\n",
+              data,
               encoding="utf-8"
           )
 
-          size = output.stat().st_size / 1000000
-
-          if size > 15:
-              raise RuntimeError(
-                  f"File too large: {size:.2f} MB"
-              )
-
-          print(f"Unique domains: {len(domains)}")
-          print(f"File size: {size:.2f} MB")
+          print("Balanced Adlist created successfully")
           PY
 
       - name: Commit balanced list
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add adlist-balanced.txt
+
           if ! git diff --cached --quiet; then
-            git commit -m "Update balanced adlist"
+            git commit -m "Update balanced adlist with AdGuard"
             git push
           fi
