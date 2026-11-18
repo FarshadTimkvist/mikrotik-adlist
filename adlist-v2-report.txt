@@ -1,0 +1,22 @@
+AdGuard DNS Filter: 190423 block domains, 11 exceptions
+AdAway Default Blocklist: 6540 block domains, 0 exceptions
+
+Unique candidates: 195950
+Removed by exceptions: 0
+Final domains: 195950
+File size: 4.14 MB
+
+Rule statistics:
+adguard: 190444
+comment: 2043
+empty: 2022
+hosts: 6540
+unsupported_modifier: 12
+unsupported_pattern: 740
+
+Compatibility notes:
+MikroTik blocks exact names only.
+Subdomains are not generated automatically.
+Unsupported modifiers and patterns are skipped.
+AdGuard rule priority is not fully reproduced.
+DNS blocking cannot remove all in-app ads.
