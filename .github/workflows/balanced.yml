@@ -1,0 +1,114 @@
+
+name: Update Balanced MikroTik Adlist
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build balanced list
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          base = (
+              "https://cdn.jsdelivr.net/gh/"
+              "hagezi/dns-blocklists@latest/"
+              "wildcard/"
+          )
+
+          sources = {
+              "Multi NORMAL": "multi-onlydomains.txt",
+              "Threat Intelligence Mini":
+                  "tif.mini-onlydomains.txt",
+          }
+
+          valid = re.compile(
+              r"(?i)^(?:[a-z0-9](?:[a-z0-9-]*"
+              r"[a-z0-9])?\.)+"
+              r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+          )
+
+          domains = set()
+
+          for name, filename in sources.items():
+              url = base + filename
+              print(f"Downloading {name}", flush=True)
+
+              request = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "MikroTik-Adlist"}
+              )
+
+              with urllib.request.urlopen(
+                  request, timeout=120
+              ) as response:
+                  content = response.read().decode(
+                      "utf-8", errors="replace"
+                  )
+
+              count = 0
+
+              for line in content.splitlines():
+                  domain = line.strip().lower()
+
+                  if domain.startswith("#") or not domain:
+                      continue
+
+                  if valid.fullmatch(domain):
+                      domains.add(domain)
+                      count += 1
+
+              if count < 1000:
+                  raise RuntimeError(
+                      f"{name}: too few valid domains"
+                  )
+
+              print(f"{name}: {count} entries")
+
+          if not 100000 <= len(domains) <= 600000:
+              raise RuntimeError(
+                  f"Unexpected total: {len(domains)}"
+              )
+
+          output = Path("adlist-balanced.txt")
+          output.write_text(
+              "\n".join(sorted(domains)) + "\n",
+              encoding="utf-8"
+          )
+
+          size = output.stat().st_size / 1000000
+
+          if size > 15:
+              raise RuntimeError(
+                  f"File too large: {size:.2f} MB"
+              )
+
+          print(f"Unique domains: {len(domains)}")
+          print(f"File size: {size:.2f} MB")
+          PY
+
+      - name: Commit balanced list
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git add adlist-balanced.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "Update balanced adlist"
+            git push
+          fi
