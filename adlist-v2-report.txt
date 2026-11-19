@@ -1,13 +1,13 @@
-AdGuard DNS Filter: 190423 block domains, 11 exceptions
+AdGuard DNS Filter: 190770 block domains, 11 exceptions
 AdAway Default Blocklist: 6540 block domains, 0 exceptions
 
-Unique candidates: 195950
+Unique candidates: 196297
 Removed by exceptions: 0
-Final domains: 195950
-File size: 4.14 MB
+Final domains: 196297
+File size: 4.15 MB
 
 Rule statistics:
-adguard: 190444
+adguard: 190791
 comment: 2043
 empty: 2022
 hosts: 6540
